@@ -1,13 +1,22 @@
+using ClairvoyantMcp;
+using Microsoft.Graph;
+
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddSingleton<GraphClientAuthProvider>();
+builder.Services.AddSingleton(sp =>
+{
+    var authProvider = sp.GetRequiredService<GraphClientAuthProvider>();
+    return new GraphServiceClient(authProvider);
+});
 builder.Services.AddHostedService<ExtrasensoryPerceptionJob>();
 
 builder.Services.AddMcpServer(o => o.ServerInfo = new()
-    {
-        Name = "Clairvoyant MCP Server",
-        Description = "Read minds and predict the future.",
-        Version = "1.0.0",
-    })
+{
+    Name = "Clairvoyant MCP Server",
+    Description = "Read minds and predict the future.",
+    Version = "1.0.0",
+})
     .WithHttpTransport(o => o.Stateless = true)
     .WithToolsFromAssembly(typeof(Program).Assembly)
     ;
