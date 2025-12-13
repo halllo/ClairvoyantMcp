@@ -83,8 +83,8 @@ public class GraphClientAuthProvider : IAuthenticationProvider
 
     public GraphClientAuthProvider(IConfiguration config, ILogger<GraphClientAuthProvider> logger)
     {
-        string clientId = config["GraphClientId"]!;
-        string? tenantId = config["MicrosoftTenantId"];
+        string clientId = config["ClientId"]!;
+        string? tenantId = config["TenantId"];
         string[] scopes = ["https://graph.microsoft.com/.default"];
         this.authClient = PublicClientApplicationBuilder.Create(clientId)
             .WithTenantIdIfNotNullNorEmpty(tenantId)
@@ -96,7 +96,11 @@ public class GraphClientAuthProvider : IAuthenticationProvider
         {
             if (cacheHelper == null)
             {
-                var storageProperties = new StorageCreationPropertiesBuilder("msal.cache"/*collisions with azure devops?*/, ".").Build();
+                var storageProperties = new StorageCreationPropertiesBuilder("msal.cache"/*collisions with azure devops?*/, ".")
+                    // .WithMacKeyChain(
+                    //     serviceName: "de.clairvoyantmcp",
+                    //     accountName: "msal_cache_account")
+                    .Build();
                 var cacheHelper = await MsalCacheHelper.CreateAsync(storageProperties);
                 cacheHelper.RegisterCache(authClient.UserTokenCache);
             }
@@ -111,7 +115,13 @@ public class GraphClientAuthProvider : IAuthenticationProvider
             catch (Exception)
             {
                 logger.LogInformation("Interactive login required");
-                var result = await authClient.AcquireTokenInteractive(scopes).ExecuteAsync();
+                /*
+                 * Does not work on MacOS:
+                 * An exception of type 'System.PlatformNotSupportedException' occurred in System.Private.CoreLib.dll but was not handled in user code: 'macOS 26.1.0'
+                 */
+                var result = await authClient.AcquireTokenInteractive(scopes)
+                    .WithUseEmbeddedWebView(false)
+                    .ExecuteAsync();
                 return result;
             }
         }));
