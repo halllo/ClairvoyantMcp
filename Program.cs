@@ -1,19 +1,22 @@
 using System.Security.Claims;
 using ClairvoyantMcp;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Graph;
-using Microsoft.Identity.Client;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddSingleton<GraphClientAuthProvider>();
-builder.Services.AddSingleton(sp =>
+builder.Services.AddSingleton<FileBasedTokenStore>();
+builder.Services.AddSingleton<GraphClientAuth>();
+builder.Services.AddScoped(sp =>
 {
-    var authProvider = sp.GetRequiredService<GraphClientAuthProvider>();
-    return new GraphServiceClient(authProvider);
+    var accountId = sp.GetRequiredService<FileBasedTokenStore>().GetAccountIds().FirstOrDefault() ?? "";// In production, you would get the account ID from the logged in user context.
+    var auth = sp.GetRequiredService<GraphClientAuth>();
+    return new GraphServiceClient(auth.GetAuthenticationProvider(accountId));
 });
+
 builder.Services.AddHostedService<ExtrasensoryPerceptionJob>();
 
 builder.Services.AddMcpServer(o => o.ServerInfo = new()
@@ -36,6 +39,7 @@ builder.Services.AddAuthentication()
         o.CallbackPath = builder.Configuration["CallbackPath"];
         o.ResponseType = OpenIdConnectResponseType.Code;
         o.SaveTokens = false; //we will store the tokens ourselves
+        o.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
         o.Scope.Add("openid");
         o.Scope.Add("profile");
         o.Scope.Add("offline_access");
@@ -45,26 +49,14 @@ builder.Services.AddAuthentication()
         {
             OnAuthorizationCodeReceived = async ctx =>
             {
-                var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                
-                var tid = ctx.Principal.FindFirstValue("tid");
-                var oid = ctx.Principal.FindFirstValue("oid");
-                var cacheKey = $"{oid}.{tid}";
-                logger.LogInformation("Authorization code received for tenant {TenantId} and object {ObjectId}", tid, oid);
+                var auth = ctx.HttpContext.RequestServices.GetRequiredService<GraphClientAuth>();
+                var account = await auth.AcquireTokenByAuthorizationCode(ctx);
 
-                var cca = ConfidentialClientApplicationBuilder
-                    .Create(builder.Configuration["ClientId"])
-                    .WithClientSecret(builder.Configuration["ClientSecret"])
-                    .WithAuthority(new Uri(o.Authority))
-                    .WithRedirectUri($"{ctx.HttpContext.Request.Scheme}://{ctx.HttpContext.Request.Host}{o.CallbackPath}")
-                    .Build();
-
-                var token = await cca.AcquireTokenByAuthorizationCode(["https://graph.microsoft.com/.default"], ctx.ProtocolMessage.Code).ExecuteAsync();
                 ctx.HandleCodeRedemption();
-                var homeAccountId = token.Account.HomeAccountId.Identifier;
-                var appUserId = ctx.Principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? $"{tid}.{oid}";
 
-                logger.LogInformation("User {AppUserId} signed in with home account id {HomeAccountId}", appUserId, homeAccountId);
+                ctx.Principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, account.Identifier)], ctx.Scheme.Name));
+
+                ctx.Success();
             }
         };
     })

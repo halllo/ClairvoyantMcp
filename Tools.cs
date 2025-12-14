@@ -31,6 +31,6 @@ public class Tools(IEnumerable<IHostedService> hostedServices, ILogger<Tools> lo
 	[Description("Predict the future. Returns a future event the user will experience.")]
 	public async Task<string> PredictTheFuture()
 	{
-		return $"Five of Spades";
+		return $"Nine of Hearts";
 	}
 }
